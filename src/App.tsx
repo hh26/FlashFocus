@@ -13,17 +13,15 @@ function App() {
   const [activeDeck, setActiveDeck] = useState<Flashcard[]>([]);
   
   // State to track which topic we are currently looking at
-  const [viewingTopicName, setViewingTopicName] = useState<string>('');
-  const [viewingTopicCards, setViewingTopicCards] = useState<Flashcard[]>([]);
+const [viewingTopicName, setViewingTopicName] = useState<string>('');
 
   const startStudySession = (selectedCards: Flashcard[]) => {
     setActiveDeck(selectedCards);
     setCurrentView('study');
   };
 
-  const openTopicView = (topicName: string, cards: Flashcard[]) => {
+const openTopicView = (topicName: string) => {
     setViewingTopicName(topicName);
-    setViewingTopicCards(cards);
     setCurrentView('topic');
   };
 
@@ -61,7 +59,6 @@ function App() {
         {currentView === 'topic' && (
           <TopicView 
             topicName={viewingTopicName} 
-            cards={viewingTopicCards} 
             onBack={() => setCurrentView('home')} 
             onStudy={startStudySession} 
           />
