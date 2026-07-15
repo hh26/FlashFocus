@@ -6,6 +6,7 @@ import StudySession from './pages/StudySession';
 import TopicView from './pages/TopicView'; // Import the new page
 import { type Flashcard } from './db';
 import { Library, PlusSquare } from 'lucide-react';
+import { Toaster } from 'sonner';
 
 function App() {
   // Add 'topic' to the allowed views
@@ -27,6 +28,7 @@ const openTopicView = (topicName: string) => {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans pb-20">
+      <Toaster theme="dark" position="top-center" richColors />
       <header className="border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-extrabold tracking-tight text-white cursor-pointer" onClick={() => setCurrentView('home')}>
