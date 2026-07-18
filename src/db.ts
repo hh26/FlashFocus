@@ -1,24 +1,23 @@
 import Dexie, { type Table } from 'dexie';
 export interface Flashcard {
-  id?: number;
+  id: string; // Changed to string UUID
   question: string;
   answer: string;
-  tags: string[]; // e.g., ['biology', 'chapter1']
-  lastReviewed?: Date;
-  easeScore?: number; // Useful if you add Spaced Repetition later
+  tags: string[];
+  lastReviewed: Date;
+  updatedAt: number; // Used to check which device has the newest edit
+  isDeleted: boolean; // Soft deletes for sync
 }
 
-export class FlashcardDatabase extends Dexie {
-  cards!: Table<Flashcard>;
+export class FlashFocusDB extends Dexie {
+  cards!: Table;
 
   constructor() {
-    super('FlashcardDB');
-    // Define the database schema
-    // 'id' is the primary key. '*tags' allows you to search/filter by tags.
-    this.version(1).stores({
-      cards: '++id, question, *tags' 
+    super('FlashFocusDB');
+    this.version(2).stores({
+      cards: 'id, question, answer, *tags, lastReviewed, updatedAt, isDeleted'
     });
   }
 }
 
-export const db = new FlashcardDatabase();
+export const db = new FlashFocusDB();

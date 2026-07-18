@@ -1,89 +1,192 @@
 // src/App.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import CreateCard from './pages/CreateCard';
 import Home from './pages/Home';
 import StudySession from './pages/StudySession';
-import TopicView from './pages/TopicView'; // Import the new page
+import TopicView from './pages/TopicView';
 import { type Flashcard } from './db';
-import { Library, PlusSquare } from 'lucide-react';
-import { Toaster } from 'sonner';
+import { Library, PlusSquare, RefreshCw, LogOut } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
+
+import { supabase } from './supabase';
+import { type Session } from '@supabase/supabase-js';
+import Auth from './components/Auth';
+import { syncDatabase } from './sync';
+
+// Define a 5-minute cooldown for automatic background syncs
+const SYNC_COOLDOWN_MS = 5 * 60 * 1000; 
 
 function App() {
-  // Add 'topic' to the allowed views
   const [currentView, setCurrentView] = useState<'home' | 'create' | 'study' | 'topic'>('home');
   const [activeDeck, setActiveDeck] = useState<Flashcard[]>([]);
-  
-  // State to track which topic we are currently looking at
-const [viewingTopicName, setViewingTopicName] = useState<string>('');
+  const [viewingTopicName, setViewingTopicName] = useState<string>('');
+
+  const [session, setSession] = useState<Session | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    // 1. Initial Load Check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setIsInitializing(false);
+      if (session) handleSync(false); // Auto-sync (respects cooldown)
+    });
+
+    // 2. Auth State Listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session);
+      
+      // CRITICAL FIX: Only sync on actual login. 
+      // Ignore 'TOKEN_REFRESHED' or 'INITIAL_SESSION' events here to prevent spam.
+      if (event === 'SIGNED_IN' && session) {
+        handleSync(true); // Force sync on explicit login
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Smart Sync Handler: accepts a 'force' parameter
+  const handleSync = async (force = true) => {
+    const lastSync = parseInt(localStorage.getItem('flashfocus_last_sync') || '0', 10);
+    const now = Date.now();
+
+    // If this is a background auto-sync and we are still in the cooldown period, abort.
+    if (!force && (now - lastSync < SYNC_COOLDOWN_MS)) {
+      console.log('Auto-sync skipped: Cooldown active.');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const { pushed, pulled } = await syncDatabase();
+      
+      // Update the cooldown timer
+      localStorage.setItem('flashfocus_last_sync', now.toString());
+      
+      if (pushed > 0 || pulled > 0) {
+        toast.success(`Sync complete: ${pushed} pushed, ${pulled} pulled.`);
+      } else if (force) {
+        // Only show the "up to date" toast if the user manually clicked the button
+        toast.info('Everything is up to date.');
+      }
+    } catch (error) {
+      if (force) toast.error('Failed to sync. You may be offline.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const startStudySession = (selectedCards: Flashcard[]) => {
     setActiveDeck(selectedCards);
     setCurrentView('study');
   };
 
-const openTopicView = (topicName: string) => {
+  const openTopicView = (topicName: string) => {
     setViewingTopicName(topicName);
     setCurrentView('topic');
   };
 
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-500">
+        <RefreshCw className="animate-spin mr-2" size={20} /> Loading...
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans pb-20">
       <Toaster theme="dark" position="top-center" richColors />
-      <header className="border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md sticky top-0 z-10">
+      
+      <header className="border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-extrabold tracking-tight text-white cursor-pointer" onClick={() => setCurrentView('home')}>
             Flash<span className="text-indigo-500">Focus</span>
           </h1>
           
-          <nav className="hidden sm:flex gap-4">
-            <button 
-              onClick={() => setCurrentView('home')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${currentView === 'home' || currentView === 'topic' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
-            >
-              <Library size={18} />
-              My Decks
-            </button>
-            <button 
-              onClick={() => setCurrentView('create')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${currentView === 'create' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
-            >
-              <PlusSquare size={18} />
-              Create
-            </button>
-          </nav>
+          <div className="flex items-center gap-4">
+            {session && (
+              <nav className="hidden sm:flex gap-2 mr-2 pr-4 border-r border-zinc-800">
+                <button 
+                  onClick={() => setCurrentView('home')}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${currentView === 'home' || currentView === 'topic' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  <Library size={18} />
+                  My Decks
+                </button>
+                <button 
+                  onClick={() => setCurrentView('create')}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${currentView === 'create' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  <PlusSquare size={18} />
+                  Create
+                </button>
+              </nav>
+            )}
+
+            {session && (
+              <div className="flex items-center gap-3">
+                <button 
+                  // Clicking the button manually forces a sync, bypassing the cooldown
+                  onClick={() => handleSync(true)} 
+                  disabled={isSyncing}
+                  className="text-zinc-400 hover:text-indigo-400 transition-colors flex items-center gap-2 text-sm bg-zinc-900 px-3 py-1.5 rounded-full border border-zinc-800 disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={isSyncing ? "animate-spin text-indigo-400" : ""} />
+                  <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync'}</span>
+                </button>
+                <button 
+                  onClick={() => supabase.auth.signOut()} 
+                  className="text-zinc-500 hover:text-red-400 transition-colors bg-zinc-900/50 p-2 rounded-full"
+                  title="Sign Out"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       
       <main className="px-4">
-        {currentView === 'home' && <Home onStudy={startStudySession} onViewTopic={openTopicView} />}
-        {currentView === 'create' && <CreateCard />}
-        {currentView === 'study' && <StudySession deckCards={activeDeck} onExit={() => setCurrentView('home')} />}
-        {currentView === 'topic' && (
-          <TopicView 
-            topicName={viewingTopicName} 
-            onBack={() => setCurrentView('home')} 
-            onStudy={startStudySession} 
-          />
+        {!session ? (
+          <Auth />
+        ) : (
+          <>
+            {currentView === 'home' && <Home onStudy={startStudySession} onViewTopic={openTopicView} />}
+            {currentView === 'create' && <CreateCard />}
+            {currentView === 'study' && <StudySession deckCards={activeDeck} onExit={() => setCurrentView('home')} />}
+            {currentView === 'topic' && (
+              <TopicView 
+                topicName={viewingTopicName} 
+                onBack={() => setCurrentView('home')} 
+                onStudy={startStudySession} 
+              />
+            )}
+          </>
         )}
       </main>
 
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 flex justify-around p-3 z-10 pb-safe">
-        {/* ... mobile nav stays exactly the same ... */}
-        <button 
-          onClick={() => setCurrentView('home')}
-          className={`flex flex-col items-center gap-1 p-2 ${currentView === 'home' || currentView === 'topic' ? 'text-indigo-500' : 'text-zinc-500'}`}
-        >
-          <Library size={24} />
-          <span className="text-xs font-medium">Decks</span>
-        </button>
-        <button 
-          onClick={() => setCurrentView('create')}
-          className={`flex flex-col items-center gap-1 p-2 ${currentView === 'create' ? 'text-indigo-500' : 'text-zinc-500'}`}
-        >
-          <PlusSquare size={24} />
-          <span className="text-xs font-medium">Create</span>
-        </button>
-      </nav>
+      {session && (
+        <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-lg border-t border-zinc-800 flex justify-around p-3 z-10 pb-safe">
+          <button 
+            onClick={() => setCurrentView('home')}
+            className={`flex flex-col items-center gap-1 p-2 w-full transition-colors ${currentView === 'home' || currentView === 'topic' ? 'text-indigo-500' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            <Library size={24} />
+            <span className="text-xs font-medium">Decks</span>
+          </button>
+          <button 
+            onClick={() => setCurrentView('create')}
+            className={`flex flex-col items-center gap-1 p-2 w-full transition-colors ${currentView === 'create' ? 'text-indigo-500' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            <PlusSquare size={24} />
+            <span className="text-xs font-medium">Create</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

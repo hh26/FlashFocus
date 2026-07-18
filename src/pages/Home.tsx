@@ -6,11 +6,13 @@ import { Layers, Play, Inbox, Search, Folder, CheckSquare, Square, ChevronRight 
 
 interface HomeProps {
   onStudy: (filteredCards: Flashcard[]) => void;
-  onViewTopic: (topicName: string, cards: Flashcard[]) => void; // New prop!
+  onViewTopic: (topicName: string, cards: Flashcard[]) => void;
 }
 
 export default function Home({ onStudy, onViewTopic }: HomeProps) {
-  const cards = useLiveQuery(() => db.cards.toArray());
+  // CRITICAL UPDATE: Filter out soft-deleted cards so they don't show up in the UI
+  const cards = useLiveQuery(() => db.cards.filter(card => !card.isDeleted).toArray());
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
 
@@ -23,7 +25,7 @@ export default function Home({ onStudy, onViewTopic }: HomeProps) {
         if (!groups['untagged']) groups['untagged'] = [];
         groups['untagged'].push(card);
       } else {
-        card.tags.forEach(tag => {
+        card.tags.forEach((tag: string) => { 
           if (!groups[tag]) groups[tag] = [];
           groups[tag].push(card);
         });
@@ -41,7 +43,7 @@ export default function Home({ onStudy, onViewTopic }: HomeProps) {
   const cardsToStudy = selectedTopics.length === 0 
     ? [] 
     : cards.filter(card => 
-        card.tags.some(tag => selectedTopics.includes(tag)) || 
+        card.tags.some((tag: string) => selectedTopics.includes(tag)) || 
         (selectedTopics.includes('untagged') && card.tags.length === 0)
       );
 

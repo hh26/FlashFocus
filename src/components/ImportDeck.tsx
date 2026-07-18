@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db';
 import { UploadCloud, CheckCircle, AlertCircle } from 'lucide-react';
 
@@ -13,15 +14,17 @@ export default function ImportDeck() {
   const processAndSaveData = async (rawData: any[]) => {
     try {
       const newCards = rawData.map((row: any) => ({
+        id: uuidv4(), // NEW: Generate unique ID string for sync
         question: row.Question || row.question || '',
         answer: row.Answer || row.answer || '',
-        // Handle tags whether they are empty, numbers (accidentally), or strings
         tags: (row.Tags || row.tags || '')
           .toString()
           .split(',')
           .map((t: string) => t.trim().toLowerCase())
           .filter((t: string) => t.length > 0),
-        lastReviewed: new Date()
+        lastReviewed: new Date(),
+        updatedAt: Date.now(), // NEW: Sync conflict resolution
+        isDeleted: false       // NEW: Soft delete flag
       })).filter(card => card.question && card.answer); // Drop rows missing core data
 
       if (newCards.length === 0) {
@@ -48,9 +51,7 @@ export default function ImportDeck() {
 
     const fileExt = file.name.split('.').pop()?.toLowerCase();
 
-    // ----------------------------------------
     // PATH A: CSV Parsing
-    // ----------------------------------------
     if (fileExt === 'csv') {
       Papa.parse(file, {
         header: true,
@@ -62,23 +63,18 @@ export default function ImportDeck() {
         }
       });
     } 
-    // ----------------------------------------
     // PATH B: Excel Parsing
-    // ----------------------------------------
     else if (fileExt === 'xlsx' || fileExt === 'xls') {
       const reader = new FileReader();
       
       reader.onload = async (e) => {
         try {
           const data = e.target?.result;
-          // Read the ArrayBuffer using SheetJS
           const workbook = XLSX.read(data, { type: 'array' });
           
-          // Grab the first sheet in the Excel file
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           
-          // Convert that sheet to an array of JSON objects
           const jsonData = XLSX.utils.sheet_to_json(worksheet);
           
           await processAndSaveData(jsonData);
@@ -100,7 +96,7 @@ export default function ImportDeck() {
       setIsUploading(false);
     }
 
-    // Reset the input so the user can upload the same file again if needed
+    // Reset the input
     event.target.value = '';
   };
 
@@ -123,14 +119,12 @@ export default function ImportDeck() {
         />
       </label>
 
-      {/* Success Message */}
       {successCount !== null && (
         <div className="mt-4 flex items-center justify-center gap-2 text-emerald-400 text-sm font-medium bg-emerald-400/10 py-2 rounded-lg">
           <CheckCircle size={16} /> Successfully imported {successCount} cards!
         </div>
       )}
 
-      {/* Error Message */}
       {error && (
         <div className="mt-4 flex items-center justify-center gap-2 text-red-400 text-sm font-medium bg-red-400/10 py-2 rounded-lg px-3">
           <AlertCircle size={16} className="shrink-0" /> {error}

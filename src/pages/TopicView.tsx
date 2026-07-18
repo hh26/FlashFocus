@@ -40,7 +40,7 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
   // --- CARD ACTIONS ---
   const handleDeleteCard = async (id: number) => {
     if (window.confirm("Are you sure you want to delete this card?")) {
-      await db.cards.delete(id);
+      await db.cards.update(id, { isDeleted: true, updatedAt: Date.now() });
     }
   };
 
@@ -72,7 +72,7 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
     // Find all cards with the old tag and replace it with the new tag
     const updatedCards = cards.map(card => ({
       ...card,
-      tags: card.tags.map(t => t === topicName ? cleanNewName : t)
+      tags: card.tags.map((t: string) => t === topicName ? cleanNewName : t)
     }));
     
     await db.cards.bulkPut(updatedCards);
