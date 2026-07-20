@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
 import { toast } from 'sonner';
 import { Sparkles, Key, Info, X, ChevronDown, CheckCircle2, RefreshCw, Send, MessageSquare } from 'lucide-react';
+import { supabase } from '../supabase';
 
 type AgentId = 'gemini' | 'openai' | 'anthropic';
 
@@ -76,6 +77,7 @@ const USE_CASES = {
 const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced", "Expert"];
 
 // --- HELPER FUNCTION FOR API CALLS ---
+// --- HELPER FUNCTION FOR API CALLS ---
 async function fetchAIResponse(agent: AgentId, apiKey: string, fullPrompt: string) {
   if (agent === 'gemini') {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${AGENTS.gemini.model}:generateContent?key=${apiKey}`, {
@@ -86,8 +88,11 @@ async function fetchAIResponse(agent: AgentId, apiKey: string, fullPrompt: strin
         generationConfig: { temperature: 0.3 }
       })
     });
-    if (!res.ok) throw new Error('Gemini API request failed. Check your key.');
+    
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(`Gemini Error: ${data.error?.message || 'Unknown request failure'}`);
+    }
     return data.candidates[0].content.parts[0].text;
   } 
   
@@ -102,8 +107,11 @@ async function fetchAIResponse(agent: AgentId, apiKey: string, fullPrompt: strin
         response_format: { type: "json_object" }
       })
     });
-    if (!res.ok) throw new Error('OpenAI API request failed. Check your key.');
+    
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(`OpenAI Error: ${data.error?.message || 'Unknown request failure'}`);
+    }
     return data.choices[0].message.content;
   }
   
@@ -123,10 +131,14 @@ async function fetchAIResponse(agent: AgentId, apiKey: string, fullPrompt: strin
         temperature: 0.3
       })
     });
-    if (!res.ok) throw new Error('Anthropic API request failed. Check your key.');
+    
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(`Anthropic Error: ${data.error?.message || 'Unknown request failure'}`);
+    }
     return data.content[0].text;
   }
+  
   throw new Error('Invalid agent selected.');
 }
 
@@ -148,14 +160,45 @@ export default function AIGenerator() {
   
   const [draftCards, setDraftCards] = useState<{question: string, answer: string}[]>([]);
   const [draftTag, setDraftTag] = useState<string>('');
+  const [savedKeys, setSavedKeys] = useState<Record<string, string>>({});
 
   // NEW: Ref to handle automatic scrolling
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const savedKey = localStorage.getItem(`ai_api_key_${selectedAgent}`);
-    setApiKey(savedKey || '');
-  }, [selectedAgent]);
+    const loadKeysFromProfile = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user?.user_metadata?.api_keys) {
+        const keys = session.user.user_metadata.api_keys;
+        setSavedKeys(keys);
+        setApiKey(keys[selectedAgent] || '');
+      }
+    };
+    loadKeysFromProfile();
+  }, []);
+
+  useEffect(() => {
+    setApiKey(savedKeys[selectedAgent] || '');
+  }, [selectedAgent, savedKeys]);
+
+  const syncKeyToCloud = async () => {
+    // Prevent unnecessary saves if the key hasn't actually changed
+    if (savedKeys[selectedAgent] === apiKey) return;
+
+    const updatedKeys = { ...savedKeys, [selectedAgent]: apiKey };
+    setSavedKeys(updatedKeys);
+    
+    const { error } = await supabase.auth.updateUser({
+      data: { api_keys: updatedKeys }
+    });
+
+    if (error) {
+      toast.error('Failed to securely save API key to your account.');
+    } else {
+      toast.success(`${AGENTS[selectedAgent].name} key securely saved!`);
+    }
+  };
 
   // NEW: Scroll into view when draft cards are ready
   useEffect(() => {
@@ -163,11 +206,6 @@ export default function AIGenerator() {
       previewRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [draftCards, isGenerating, isRefining]);
-
-  const saveKey = (key: string) => {
-    setApiKey(key);
-    localStorage.setItem(`ai_api_key_${selectedAgent}`, key);
-  };
 
   const getFormatInstructions = (expectedCount: number) => `
     Respond ONLY with a valid JSON object. Do not include markdown formatting like \`\`\`json.
@@ -192,7 +230,11 @@ export default function AIGenerator() {
       setDraftCards(generatedData.cards);
       toast.success('Cards drafted successfully!');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to generate cards.');
+      if (err instanceof SyntaxError) {
+        toast.error('The AI failed to format the cards correctly. Please try generating again.');
+      } else {
+        toast.error(err.message || 'Failed to generate cards.');
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -221,7 +263,11 @@ export default function AIGenerator() {
       setChatInput('');
       toast.success('Deck updated based on your feedback!');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to refine cards.');
+      if (err instanceof SyntaxError) {
+        toast.error('The AI failed to format the response correctly. Try tweaking your feedback.');
+      } else {
+        toast.error(err.message || 'Failed to refine cards.');
+      }
     } finally {
       setIsRefining(false);
     }
@@ -287,7 +333,10 @@ export default function AIGenerator() {
           <input
             type="password"
             value={apiKey}
-            onChange={(e) => saveKey(e.target.value)}
+            // Update local state instantly so typing is smooth
+            onChange={(e) => setApiKey(e.target.value)}
+            // Trigger the cloud save ONLY when they click out of the box
+            onBlur={syncKeyToCloud}
             placeholder="Paste your secret key here..."
             className="w-full bg-zinc-950 text-zinc-100 border border-zinc-700 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none"
           />

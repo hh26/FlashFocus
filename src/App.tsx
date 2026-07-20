@@ -24,38 +24,34 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => {
     // 1. Initial Load Check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setIsInitializing(false);
-      if (session) handleSync(false); // Auto-sync (respects cooldown)
+      if (session) handleSync(false); // Background sync
     });
 
     // 2. Auth State Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-      
-      // CRITICAL FIX: Only sync on actual login. 
-      // Ignore 'TOKEN_REFRESHED' or 'INITIAL_SESSION' events here to prevent spam.
       if (event === 'SIGNED_IN' && session) {
-        handleSync(true); // Force sync on explicit login
+        handleSync(false); // Background sync (respects cooldown if it's just a tab focus)
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Smart Sync Handler: accepts a 'force' parameter
-  const handleSync = async (force = true) => {
+  const handleSync = async (isManual = false) => {
     const lastSync = parseInt(localStorage.getItem('flashfocus_last_sync') || '0', 10);
     const now = Date.now();
 
-    // If this is a background auto-sync and we are still in the cooldown period, abort.
-    if (!force && (now - lastSync < SYNC_COOLDOWN_MS)) {
-      console.log('Auto-sync skipped: Cooldown active.');
-      return;
+    // If it's a background auto-sync and we are in the 5-minute cooldown period, abort instantly.
+    if (!isManual && (now - lastSync < SYNC_COOLDOWN_MS)) {
+      return; 
     }
 
     setIsSyncing(true);
@@ -66,13 +62,14 @@ function App() {
       localStorage.setItem('flashfocus_last_sync', now.toString());
       
       if (pushed > 0 || pulled > 0) {
+        // Only show a toast in the background if data ACTUALLY moved
         toast.success(`Sync complete: ${pushed} pushed, ${pulled} pulled.`);
-      } else if (force) {
-        // Only show the "up to date" toast if the user manually clicked the button
+      } else if (isManual) {
+        // ONLY show the "up to date" toast if the user manually clicked the sync button
         toast.info('Everything is up to date.');
       }
     } catch (error) {
-      if (force) toast.error('Failed to sync. You may be offline.');
+      if (isManual) toast.error('Failed to sync. You may be offline.');
     } finally {
       setIsSyncing(false);
     }
@@ -129,8 +126,7 @@ function App() {
             {session && (
               <div className="flex items-center gap-3">
                 <button 
-                  // Clicking the button manually forces a sync, bypassing the cooldown
-                  onClick={() => handleSync(true)} 
+                  onClick={() => handleSync(true)} // Manual sync bypasses cooldown
                   disabled={isSyncing}
                   className="text-zinc-400 hover:text-indigo-400 transition-colors flex items-center gap-2 text-sm bg-zinc-900 px-3 py-1.5 rounded-full border border-zinc-800 disabled:opacity-50"
                 >
@@ -138,7 +134,7 @@ function App() {
                   <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync'}</span>
                 </button>
                 <button 
-                  onClick={() => supabase.auth.signOut()} 
+                  onClick={() => setShowLogoutModal(true)} 
                   className="text-zinc-500 hover:text-red-400 transition-colors bg-zinc-900/50 p-2 rounded-full"
                   title="Sign Out"
                 >
@@ -186,6 +182,33 @@ function App() {
             <span className="text-xs font-medium">Create</span>
           </button>
         </nav>
+      )}
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-white mb-2">Sign Out</h3>
+            <p className="text-sm text-zinc-400 mb-6">Are you sure you want to sign out? Make sure your cards are fully synced.</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowLogoutModal(false)} 
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-lg transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  localStorage.removeItem('flashfocus_last_sync');
+                  supabase.auth.signOut();
+                }} 
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded-lg transition-colors font-medium"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

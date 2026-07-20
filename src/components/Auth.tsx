@@ -1,17 +1,24 @@
-// src/components/Auth.tsx
 import { useState } from 'react';
 import { supabase } from '../supabase';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 
 export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSignUp && password !== confirmPassword) {
+      toast.error('Passwords do not match!');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -56,17 +63,43 @@ export default function Auth() {
               className="w-full bg-zinc-950 text-white border border-zinc-700 rounded-lg p-3 outline-none focus:border-indigo-500 transition-colors"
             />
           </div>
+          
           <div>
             <label className="block text-sm font-medium text-zinc-400 mb-1.5">Password</label>
-            <input
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-zinc-950 text-white border border-zinc-700 rounded-lg p-3 outline-none focus:border-indigo-500 transition-colors"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-zinc-950 text-white border border-zinc-700 rounded-lg p-3 pr-10 outline-none focus:border-indigo-500 transition-colors"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
+
+          {isSignUp && (
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Confirm Password</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-zinc-950 text-white border border-zinc-700 rounded-lg p-3 pr-10 outline-none focus:border-indigo-500 transition-colors"
+                />
+              </div>
+            </div>
+          )}
           
           <button 
             type="submit" 

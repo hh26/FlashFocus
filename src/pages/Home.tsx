@@ -98,25 +98,35 @@ export default function Home({ onStudy, onViewTopic }: HomeProps) {
             <div 
               key={topic} 
               onClick={() => onViewTopic(topic, topicCards)}
-              className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between cursor-pointer hover:border-zinc-700 hover:bg-zinc-800/50 transition-colors group"
+              // Added 'gap-4' here to enforce spacing between the left and right sections
+              className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between gap-4 cursor-pointer hover:border-zinc-700 hover:bg-zinc-800/50 transition-colors group"
             >
-              <div className="flex items-center gap-4">
-                <button onClick={(e) => toggleTopicSelection(topic, e)} className="text-zinc-400 hover:text-indigo-400 transition-colors">
+              {/* Added 'flex-1' and 'min-w-0' so this side can shrink */}
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                
+                {/* Added 'shrink-0' to protect the checkbox */}
+                <button onClick={(e) => toggleTopicSelection(topic, e)} className="text-zinc-400 hover:text-indigo-400 transition-colors shrink-0">
                   {isSelected ? <CheckSquare size={22} className="text-indigo-500" /> : <Square size={22} />}
                 </button>
-                <div className="flex items-center gap-2">
-                  <Folder size={18} className="text-indigo-500" />
-                  <span className="font-semibold text-zinc-100 capitalize">
+                
+                {/* Added 'flex-1' and 'min-w-0' to the text wrapper */}
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  {/* Added 'shrink-0' to protect the folder icon */}
+                  <Folder size={18} className="text-indigo-500 shrink-0" />
+                  
+                  {/* Added 'truncate' to handle super long text with an ellipsis (...) */}
+                  <span className="font-semibold text-zinc-100 capitalize truncate">
                     {topic === 'untagged' ? 'Uncategorized' : topic}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
+              {/* Added 'shrink-0' to the right side so the card count never gets crushed */}
+              <div className="flex items-center gap-2 sm:gap-4 shrink-0">
                 <span className="text-sm text-zinc-500 font-medium">
-                  {topicCards.length} {topicCards.length === 1 ? 'card' : 'cards'}
+                  {topicCards.length} <span className="hidden sm:inline">{topicCards.length === 1 ? 'card' : 'cards'}</span>
                 </span>
-                <ChevronRight size={18} className="text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+                <ChevronRight size={18} className="text-zinc-600 group-hover:text-zinc-400 transition-colors shrink-0" />
               </div>
             </div>
           );
