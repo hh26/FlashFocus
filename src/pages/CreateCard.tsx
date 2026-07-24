@@ -38,6 +38,7 @@ export default function CreateCard() {
       });
 
       toast.success('Card created successfully!');
+      window.dispatchEvent(new Event('local-data-changed'));
       setQuestion('');
       setAnswer('');
       document.getElementById('questionInput')?.focus();

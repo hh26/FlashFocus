@@ -45,12 +45,12 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleSync = async (isManual = false) => {
+  const handleSync = async (isManual = false, bypassCooldown = false) => {
     const lastSync = parseInt(localStorage.getItem('flashfocus_last_sync') || '0', 10);
     const now = Date.now();
 
-    // If it's a background auto-sync and we are in the 5-minute cooldown period, abort instantly.
-    if (!isManual && (now - lastSync < SYNC_COOLDOWN_MS)) {
+    // Abort if it's a standard background check and we are in cooldown
+    if (!isManual && !bypassCooldown && (now - lastSync < SYNC_COOLDOWN_MS)) {
       return; 
     }
 
@@ -58,14 +58,11 @@ function App() {
     try {
       const { pushed, pulled } = await syncDatabase();
       
-      // Update the cooldown timer
       localStorage.setItem('flashfocus_last_sync', now.toString());
       
       if (pushed > 0 || pulled > 0) {
-        // Only show a toast in the background if data ACTUALLY moved
         toast.success(`Sync complete: ${pushed} pushed, ${pulled} pulled.`);
       } else if (isManual) {
-        // ONLY show the "up to date" toast if the user manually clicked the sync button
         toast.info('Everything is up to date.');
       }
     } catch (error) {
@@ -74,6 +71,30 @@ function App() {
       setIsSyncing(false);
     }
   };
+
+  useEffect(() => {
+    if (!session) return;
+
+    // Trigger A: Pull data when you switch back to this tab/device
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleSync(false, false); // Respects the 5-minute cooldown
+      }
+    };
+
+    // Trigger B: Push data instantly when you make a change locally
+    const handleLocalDataChange = () => {
+      handleSync(false, true); // Silent, but bypasses the cooldown!
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('local-data-changed', handleLocalDataChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('local-data-changed', handleLocalDataChange);
+    };
+  }, [session]);
 
   const startStudySession = (selectedCards: Flashcard[]) => {
     setActiveDeck(selectedCards);

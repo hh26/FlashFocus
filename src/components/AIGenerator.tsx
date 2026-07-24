@@ -287,6 +287,7 @@ export default function AIGenerator() {
     try {
       await db.cards.bulkAdd(formattedCards);
       toast.success(`Saved ${formattedCards.length} cards to #${draftTag}!`);
+      window.dispatchEvent(new Event('local-data-changed'));
       setTopic('');
       setDraftCards([]);
       setDraftTag('');

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Flashcard } from '../db';
-import { ArrowLeft, Play, FolderOpen, Pencil, Trash2, X, Save, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Play, FolderOpen, Pencil, Trash2, X, Save, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 interface TopicViewProps {
   topicName: string;
@@ -14,11 +14,15 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
   const isUntagged = topicName === 'untagged';
   const displayName = isUntagged ? 'Uncategorized' : topicName;
 
-  // 1. Fetch LIVE data for this specific topic
+  // 1. Fetch LIVE data for this specific topic (Added .filter(c => !c.isDeleted) for soft-deletes)
   const cards = useLiveQuery(() => {
-    if (isUntagged) return db.cards.filter(c => !c.tags || c.tags.length === 0).toArray();
-    return db.cards.where('tags').equals(topicName).toArray();
+    if (isUntagged) return db.cards.filter(c => (!c.tags || c.tags.length === 0) && !c.isDeleted).toArray();
+    return db.cards.where('tags').equals(topicName).filter(c => !c.isDeleted).toArray();
   }, [topicName]);
+
+  // Masked Answers States
+  const [revealedCards, setRevealedCards] = useState<Set<number>>(new Set());
+  const [isAllRevealed, setIsAllRevealed] = useState(false);
 
   // Modal States
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
@@ -37,10 +41,30 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
   if (cards === undefined) return <div className="text-zinc-400 text-center mt-10">Loading deck...</div>;
   if (cards.length === 0) return null; // Will auto-redirect via useEffect
 
+  // --- MASKING ACTIONS ---
+  const toggleReveal = (cardId: number) => {
+    setRevealedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(cardId)) newSet.delete(cardId);
+      else newSet.add(cardId);
+      return newSet;
+    });
+  };
+
+  const toggleAll = () => {
+    if (isAllRevealed) {
+      setRevealedCards(new Set());
+    } else {
+      setRevealedCards(new Set(cards.map(c => c.id!)));
+    }
+    setIsAllRevealed(!isAllRevealed);
+  };
+
   // --- CARD ACTIONS ---
   const handleDeleteCard = async (id: number) => {
     if (window.confirm("Are you sure you want to delete this card?")) {
       await db.cards.update(id, { isDeleted: true, updatedAt: Date.now() });
+      window.dispatchEvent(new Event('local-data-changed'));
     }
   };
 
@@ -56,8 +80,10 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
     await db.cards.update(editingCard.id, {
       question: editForm.question,
       answer: editForm.answer,
-      tags: updatedTags
+      tags: updatedTags,
+      updatedAt: Date.now()
     });
+    window.dispatchEvent(new Event('local-data-changed'));
     setEditingCard(null);
   };
 
@@ -69,20 +95,27 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
     }
     const cleanNewName = newTopicName.trim().toLowerCase();
     
-    // Find all cards with the old tag and replace it with the new tag
     const updatedCards = cards.map(card => ({
       ...card,
-      tags: card.tags.map((t: string) => t === topicName ? cleanNewName : t)
+      tags: card.tags.map((t: string) => t === topicName ? cleanNewName : t),
+      updatedAt: Date.now()
     }));
     
     await db.cards.bulkPut(updatedCards);
+    window.dispatchEvent(new Event('local-data-changed'));
     setIsEditingTopic(false);
-    onBack(); // Send user back to home to refresh the folder list
+    onBack(); 
   };
 
   const handleDeleteTopicAndCards = async () => {
-    const idsToDelete = cards.map(c => c.id!);
-    await db.cards.bulkDelete(idsToDelete);
+    // CRITICAL: We must use soft delete (bulkPut) instead of bulkDelete, otherwise they will re-sync from cloud!
+    const updatedCards = cards.map(card => ({
+      ...card,
+      isDeleted: true,
+      updatedAt: Date.now()
+    }));
+    await db.cards.bulkPut(updatedCards);
+    window.dispatchEvent(new Event('local-data-changed'));
     setIsDeletingTopic(false);
     onBack();
   };
@@ -94,7 +127,7 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
       </button>
 
       {/* Header Area */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4 mb-8 bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4 mb-4 bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
         <div>
           <div className="flex items-center gap-3 mb-2">
             <FolderOpen className="text-indigo-500" size={28} />
@@ -120,31 +153,72 @@ export default function TopicView({ topicName, onBack, onStudy }: TopicViewProps
         </div>
       </div>
 
+      {/* Controls Area */}
+      <div className="flex justify-end mb-4">
+        <button 
+          onClick={toggleAll}
+          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/50 px-3 py-1.5 rounded-full border border-zinc-800"
+        >
+          {isAllRevealed ? <EyeOff size={16} /> : <Eye size={16} />}
+          {isAllRevealed ? 'Hide All Answers' : 'Reveal All Answers'}
+        </button>
+      </div>
+
       {/* Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {cards.map(card => (
-          <div key={card.id} className="bg-zinc-900 border border-zinc-800 p-5 rounded-xl flex flex-col gap-4 relative group hover:border-zinc-700 transition-colors">
-            
-            {/* Card Action Buttons (Visible on hover) */}
-            <div className="absolute top-3 right-3 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex gap-2">
-              <button onClick={() => openEditCard(card)} className="p-2 bg-zinc-800 hover:bg-indigo-600 text-zinc-300 hover:text-white rounded-md transition-colors">
-                <Pencil size={14} />
-              </button>
-              <button onClick={() => handleDeleteCard(card.id!)} className="p-2 bg-zinc-800 hover:bg-red-600 text-zinc-300 hover:text-white rounded-md transition-colors">
-                <Trash2 size={14} />
-              </button>
-            </div>
+        {cards.map(card => {
+          const isRevealed = revealedCards.has(card.id!);
 
-            <div>
-              <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1 block">Question</span>
-              <p className="text-zinc-200 font-medium pr-16">{card.question}</p>
+          return (
+            <div key={card.id} className="bg-zinc-900 border border-zinc-800 p-5 rounded-xl flex flex-col gap-4 relative group hover:border-zinc-700 transition-colors">
+              
+              {/* Card Action Buttons (Visible on hover) */}
+              <div className="absolute top-3 right-3 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex gap-2 z-10">
+                <button onClick={() => openEditCard(card)} className="p-2 bg-zinc-800 hover:bg-indigo-600 text-zinc-300 hover:text-white rounded-md transition-colors">
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => handleDeleteCard(card.id!)} className="p-2 bg-zinc-800 hover:bg-red-600 text-zinc-300 hover:text-white rounded-md transition-colors">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              {/* Question */}
+              <div>
+                <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1 block">Question</span>
+                <p className="text-zinc-200 font-medium pr-16">{card.question}</p>
+              </div>
+              
+              {/* Masked Answer */}
+              <div 
+                className="pt-4 border-t border-zinc-800/50 cursor-pointer group/answer relative"
+                onClick={() => toggleReveal(card.id!)}
+                title="Tap to reveal answer"
+              >
+                <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Answer</span>
+                
+                <div className={`relative transition-all duration-300 ${isRevealed ? 'opacity-100' : 'opacity-80'}`}>
+                  <p className={`text-sm sm:text-base transition-all duration-300 select-none ${
+                    isRevealed 
+                      ? 'text-zinc-300 blur-none' 
+                      : 'text-zinc-400 blur-sm bg-zinc-800/50 rounded px-1'
+                  }`}>
+                    {card.answer}
+                  </p>
+                  
+                  {/* Overlay prompt when hidden */}
+                  {!isRevealed && (
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/answer:opacity-100 transition-opacity">
+                      <span className="bg-zinc-800 text-zinc-300 text-xs font-medium px-2 py-1 rounded-md shadow-lg border border-zinc-700 flex items-center gap-1">
+                        <Eye size={12} /> Tap to reveal
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </div>
-            <div className="pt-4 border-t border-zinc-800/50">
-              <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1 block">Answer</span>
-              <p className="text-zinc-400 text-sm">{card.answer}</p>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* MODAL: Edit Card */}
